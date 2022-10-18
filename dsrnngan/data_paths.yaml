@@ -1,18 +1,18 @@
-LOCATION1:
+EWC:
     GENERAL:
-        TRUTH_PATH: '/path/to/truth/data'
-        FORECAST_PATH: '/path/to/forecast/data'
-        CONSTANTS_PATH: '/path/to/constants/data'
+        TRUTH_PATH: '/ppdata/NIMROD'
+        FORECAST_PATH: '/ppdata/IFS'
+        CONSTANTS_PATH: '/ppdata/constants'
 
     TFRecords:
-        tfrecords_path: '/path/to/tfrecords/folder'
+        tfrecords_path: '/ppdata/tfrecordsIFS_new'
 
 
-LOCATION2:
+AOPP:
     GENERAL:
-        TRUTH_PATH: '/another/path/to/truth/data'
-        FORECAST_PATH: '/another/path/to/forecast/data'
-        CONSTANTS_PATH: '/another/path/to/constants/data'
+        TRUTH_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/NIMROD'
+        FORECAST_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/IFS'
+        CONSTANTS_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/constants'
 
     TFRecords:
-        tfrecords_path: '/another/path/to/tfrecords/folder'
+        tfrecords_path: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/tfrecordsIFS20'
