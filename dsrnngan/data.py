@@ -14,7 +14,7 @@ FCST_PATH = data_paths["GENERAL"]["FORECAST_PATH"]
 CONSTANTS_PATH = data_paths["GENERAL"]["CONSTANTS_PATH"]
 
 all_fcst_fields = ['tp', 'cp', 'sp', 'tisr', 'cape', 'tclw', 'tcwv', 'u700', 'v700']
-fcst_hours = np.array(range(24))
+fcst_hours = np.array([i for i in range(5)] + [i for i in range(6, 17)] + [i for i in range(18, 24)])
 
 
 def denormalise(x):
@@ -47,6 +47,9 @@ def load_radar_and_mask(date, hour, log_precip=False, aggregate=1):
     # The remapping of the NIMROD radar left a few negative numbers, so remove those
     y[y < 0.0] = 0.0
 
+    # crop from 951x951 down to 940x940
+    y = y[5:-6, 5:-6]
+
     # mask: False for valid radar data, True for invalid radar data
     # (compatible with the NumPy masked array functionality)
     # if all data is valid:
@@ -66,18 +69,25 @@ def logprec(y, log_precip=True):
 
 
 def load_hires_constants(batch_size=1):
-    oro_path = os.path.join(CONSTANTS_PATH, "orography.nc")
-    df = xr.load_dataset(oro_path)
+    lsm_path = os.path.join(CONSTANTS_PATH, "hgj2_constants_0.01_degree.nc")
+    df = xr.load_dataset(lsm_path)
     # LSM is already 0:1
-    lsm = np.array(df['LSM'])
+    lsm = np.array(df['LSM'])[:, ::-1, :]
+    df.close()
 
+    oro_path = os.path.join(CONSTANTS_PATH, "topo_local_0.01.nc")
+    df = xr.load_dataset(oro_path)
     # Orography.  Clip below, to remove spectral artifacts, and normalise by max
     z = df['z'].data
+    z = z[:, ::-1, :]
     z[z < 5] = 5
     z = z/z.max()
 
     df.close()
     # print(z.shape, lsm.shape)
+    # crop from 951x951 down to 940x940
+    lsm = lsm[..., 5:-6, 5:-6]
+    z = z[..., 5:-6, 5:-6]
     return np.repeat(np.stack([z, lsm], -1), batch_size, axis=0)
 
 
@@ -149,7 +159,9 @@ def load_fcst(ifield, date, hour, log_precip=False, norm=False):
     else:
         data = data[time_index, :, :]
 
-    y = np.array(data[:, :])
+    y = np.array(data[::-1, :])
+    # crop from 96x96 to 94x94
+    y = y[1:-1, 1:-1]
     data.close()
     ds.close()
     if field in ['tp', 'cp', 'pr', 'prl', 'prc']:
