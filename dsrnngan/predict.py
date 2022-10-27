@@ -92,7 +92,7 @@ data_paths = read_config.get_data_paths()
 batch_size = 1
 
 weights_fn = os.path.join(log_folder, 'models', f'gen_weights-{model_number}.h5')
-dates = get_dates(predict_year)
+dates = get_dates(predict_year, ecmwf_file_order=True)
 
 if problem_type == "normal":
     autocoarsen = False

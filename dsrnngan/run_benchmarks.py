@@ -37,7 +37,7 @@ batch_size = 1  # memory issues
 log_fname = os.path.join(log_folder, f"benchmarks_{predict_year}_{num_images}.txt")
 
 # setup data
-dates = get_dates(predict_year)
+dates = get_dates(predict_year, ecmwf_file_order=True)
 data_benchmarks = DataGeneratorFull(dates=dates,
                                     fcst_fields=all_fcst_fields,
                                     batch_size=batch_size,
