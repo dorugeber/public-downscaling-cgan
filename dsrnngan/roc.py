@@ -68,7 +68,7 @@ def calculate_roc(*,
                                    padding=padding)
 
     # load appropriate dataset
-    dates = get_dates(predict_year)
+    dates = get_dates(predict_year, ecmwf_file_order=True)
     data_predict = DataGeneratorFull(dates=dates,
                                      fcst_fields=all_fcst_fields,
                                      batch_size=batch_size,
