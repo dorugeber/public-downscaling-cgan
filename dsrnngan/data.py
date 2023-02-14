@@ -53,7 +53,8 @@ def load_radar_and_mask(date, hour, log_precip=False, aggregate=1):
     # mask: False for valid radar data, True for invalid radar data
     # (compatible with the NumPy masked array functionality)
     # if all data is valid:
-    mask = np.full(y.shape, False, dtype=bool)
+    # mask = np.full(y.shape, False, dtype=bool)
+    mask = np.load("/ppdata/NIMROD_mask/original.npy")
 
     if log_precip:
         return np.log10(1+y), mask
