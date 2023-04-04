@@ -5,7 +5,7 @@ ECMWF:
         CONSTANTS_PATH: '/ppdata/constants'
 
     TFRecords:
-        tfrecords_path: '/ppdata/tfrecordsIFS_new'
+        tfrecords_path: '/flooddata/tfrecords_IFStime'
 
 
 AOPP:
@@ -15,4 +15,4 @@ AOPP:
         CONSTANTS_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/constants'
 
     TFRecords:
-        tfrecords_path: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/tfrecordsIFS20'
+        tfrecords_path: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/tfrecords_IFStime'
