@@ -1,6 +1,6 @@
 """ File for handling data loading and saving. """
 import os
-from datetime import datetime, timedelta
+import datetime
 
 import numpy as np
 import xarray as xr
@@ -14,7 +14,6 @@ FCST_PATH = data_paths["GENERAL"]["FORECAST_PATH"]
 CONSTANTS_PATH = data_paths["GENERAL"]["CONSTANTS_PATH"]
 
 all_fcst_fields = ['tp', 'cp', 'sp', 'tisr', 'cape', 'tclw', 'tcwv', 'u700', 'v700']
-fcst_hours = np.array([i for i in range(5)] + [i for i in range(6, 17)] + [i for i in range(18, 24)])
 
 
 def denormalise(x):
@@ -24,17 +23,64 @@ def denormalise(x):
     return np.minimum(10**x - 1, 500.0)
 
 
-def get_dates(year):
-    """
-    Return dates where we have radar data
-    """
-    from glob import glob
-    file_paths = os.path.join(RADAR_PATH, str(year), "*.nc")
-    files = glob(file_paths)
-    dates = []
-    for f in files:
-        dates.append(f[:-3].split('_')[-1])
-    return sorted(dates)
+def get_dates(year,
+              lead_time,
+              length,
+              start_time):
+    '''
+    Returns a list of valid dates for which sufficient radar data exists,
+    given the other input parameters.  Radar data may not be available
+    for certain days, hence this is not quite the full year.
+    Parameters:
+        year (int): forecasts starting in this year
+        lead_time (int): Lead time of first forecast/truth pair in sequence
+        length (int): Number of sequence steps to return (1+)
+        start_time (string): Either '00' or '12', the IFS forecast to use
+    '''
+    assert start_time in ('00', '12')
+    assert length >= 1
+    assert lead_time + length <= 17, "only 17 hours of forecasts in this dataset"
+
+    # Build "cache" of radar dates that exist
+    radar_cache = set()
+    date = datetime.date(year, 1, 1)
+    oneday = datetime.timedelta(days=1)
+    end_date = datetime.date(year+1, 1, 10)  # go a bit into following year since lead_time + length could be several days
+    while date < end_date:
+        datestr = date.strftime('%Y%m%d')
+        if os.path.exists(os.path.join(RADAR_PATH, str(date.year), f"metoffice-c-band-rain-radar_uk_{datestr}.nc")):
+            radar_cache.add(datestr)
+        date += oneday
+
+    # Now work out which IFS start dates to use. For each candidate start date,
+    # work out which NIMROD dates are needed, and check if they exist.
+
+    # TODO: check off-by-one errors due to accumulated fields, etc.
+
+    # Could check the IFS file to be safer?  But would be a lot slower...
+    if start_time == '00':
+        ifsstart = datetime.datetime(year, 1, 1, hour=0)
+    else:
+        ifsstart = datetime.datetime(year, 1, 1, hour=12)
+
+    end_date = datetime.datetime(year+1, 1, 1)
+    valid_dates = []
+    while ifsstart < end_date:
+        # Check hour by hour.  Not particularly efficient, but almost certainly
+        # not a bottleneck, since we don't hit the disk. Could re-write if needed.
+        valid = True
+        # check for off-by-one error here?
+        for ii in range(lead_time, lead_time+length):
+            nimtime = ifsstart + datetime.timedelta(hours=ii)
+            if nimtime.strftime('%Y%m%d') not in radar_cache:
+                valid = False
+                break
+        if valid:
+            datestr = ifsstart.strftime('%Y%m%d')
+            valid_dates.append(datestr)
+
+        ifsstart += oneday
+    return np.array(valid_dates)
 
 
 def load_radar_and_mask(date, hour, log_precip=False, aggregate=1):
@@ -92,8 +138,44 @@ def load_hires_constants(batch_size=1):
     return np.repeat(np.stack([z, lsm], -1), batch_size, axis=0)
 
 
-def load_fcst_radar_batch(batch_dates, fcst_fields=all_fcst_fields, log_precip=False,
-                          hour=0, norm=False):
+# TODO: overwrite load_fcst_radar_batch with this
+def get_seq_data(fcst_fields, start_date, start_hour, lead_time, length,
+                 log_precip=False, ifs_norm=False):
+    ifslong = xr.open_dataset(f'{IFS_PATH_FLOOD}/sfc_{start_date}_{start_hour}.nc')
+
+    # IFS labels time by the end of the hour rather than beginning
+    time = ifslong.time[lead_time] - pd.Timedelta(hours=1)
+
+    nim = load_nimrod_seq(time.dt.strftime('%Y%m%d').item(), time.dt.hour.item(),
+                          log_precip=log_precip, aggregate=1)
+
+    ifs = load_ifsstack_seq(fields, start_date, start_hour, lead_time,
+                            log_precip=log_precip, norm=ifs_norm)
+
+    ifslong.close()
+    return ifs, nim
+
+
+
+def load_fcst_radar_batch(batch_dates,
+                          lead_time,
+                          length,
+                          start_time,
+                          fcst_fields=all_fcst_fields,
+                          log_precip=False,
+                          hour=0,
+                          norm=False):
+    '''
+    Returns a temporal sequence of (forecast, truth, mask) data.
+    Parameters:
+        batch_dates (list of strings): Dates of forecasts
+        lead_time (int): Lead time of first forecast/truth pair in sequence
+        length (int): Number of sequence steps to return (1+)
+        start_time (string): Start hour of forecast, either '00' or '12'
+        fcst_fields (list of strings): The fields to be used
+        log_precip (bool): Whether to apply log10(1+x) transform to precip-related fields
+        ifs_norm (bool): Whether to apply normalisation to fields to make O(1)
+    '''
     batch_x = []  # forecast
     batch_y = []  # radar
     batch_mask = []  # mask
@@ -120,20 +202,20 @@ def load_fcst_radar_batch(batch_dates, fcst_fields=all_fcst_fields, log_precip=F
 
 def load_fcst(ifield, date, hour, log_precip=False, norm=False):
     # Get the time required (compensating for IFS forecast saving precip at the end of the timestep)
-    time = datetime(year=int(date[:4]), month=int(date[4:6]), day=int(date[6:8]), hour=hour) + timedelta(hours=1)
+    time = datetime.datetime(year=int(date[:4]), month=int(date[4:6]), day=int(date[6:8]), hour=hour) + datetime.timedelta(hours=1)
 
     # Get the correct forecast starttime
     if time.hour < 6:
-        tmpdate = time - timedelta(days=1)
-        loaddate = datetime(year=tmpdate.year, month=tmpdate.month, day=tmpdate.day, hour=18)
+        tmpdate = time - datetime.timedelta(days=1)
+        loaddate = datetime.datetime(year=tmpdate.year, month=tmpdate.month, day=tmpdate.day, hour=18)
         loadtime = '12'
     elif 6 <= time.hour < 18:
         tmpdate = time
-        loaddate = datetime(year=tmpdate.year, month=tmpdate.month, day=tmpdate.day, hour=6)
+        loaddate = datetime.datetime(year=tmpdate.year, month=tmpdate.month, day=tmpdate.day, hour=6)
         loadtime = '00'
     elif 18 <= time.hour < 24:
         tmpdate = time
-        loaddate = datetime(year=tmpdate.year, month=tmpdate.month, day=tmpdate.day, hour=18)
+        loaddate = datetime.datetime(year=tmpdate.year, month=tmpdate.month, day=tmpdate.day, hour=18)
         loadtime = '12'
     else:
         assert False, "Not acceptable time"
@@ -186,8 +268,6 @@ def load_fcst_stack(fields, date, hour, log_precip=False, norm=False):
 
 
 def get_fcst_stats(field, year=2018):
-    import datetime
-
     # create date objects
     begin_year = datetime.date(year, 1, 1)
     end_year = datetime.date(year, 12, 31)
