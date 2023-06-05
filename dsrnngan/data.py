@@ -83,7 +83,16 @@ def get_dates(year,
     return np.array(valid_dates)
 
 
-def load_radar_and_mask(date, hour, log_precip=False, aggregate=1):
+def load_radar_and_mask(fcst_date, lead_time, length, start_time, log_precip=False, aggregate=1):
+    # need to calcuate radar date[s] from input arguments
+    # date, lead_time, length, start_time
+    fcst_start = datetime.datetime.strptime(fcst_date, '%Y%m%d')
+    if start_time == "00":
+        fcst_start = fcst_start.replace(hour=0)
+    elif start_time == "12":
+        fcst_start = fcst_start.replace(hour=12)
+    data_start = fcst_start + datetime.timedelta(hours=lead_time)
+
     year = date[:4]
     data_path = os.path.join(RADAR_PATH, year, f"metoffice-c-band-rain-radar_uk_{date}.nc")
     data = xr.open_dataset(data_path)
@@ -138,23 +147,22 @@ def load_hires_constants(batch_size=1):
     return np.repeat(np.stack([z, lsm], -1), batch_size, axis=0)
 
 
-# TODO: overwrite load_fcst_radar_batch with this
-def get_seq_data(fcst_fields, start_date, start_hour, lead_time, length,
-                 log_precip=False, ifs_norm=False):
-    ifslong = xr.open_dataset(f'{IFS_PATH_FLOOD}/sfc_{start_date}_{start_hour}.nc')
+# early attempt, maybe something useful in here?
+# def get_seq_data(fcst_fields, start_date, start_hour, lead_time, length,
+#                  log_precip=False, ifs_norm=False):
+#     ifslong = xr.open_dataset(f'{IFS_PATH_FLOOD}/sfc_{start_date}_{start_hour}.nc')
 
-    # IFS labels time by the end of the hour rather than beginning
-    time = ifslong.time[lead_time] - pd.Timedelta(hours=1)
+#     # IFS labels time by the end of the hour rather than beginning
+#     time = ifslong.time[lead_time] - pd.Timedelta(hours=1)
 
-    nim = load_nimrod_seq(time.dt.strftime('%Y%m%d').item(), time.dt.hour.item(),
-                          log_precip=log_precip, aggregate=1)
+#     nim = load_nimrod_seq(time.dt.strftime('%Y%m%d').item(), time.dt.hour.item(),
+#                           log_precip=log_precip, aggregate=1)
 
-    ifs = load_ifsstack_seq(fields, start_date, start_hour, lead_time,
-                            log_precip=log_precip, norm=ifs_norm)
+#     ifs = load_ifsstack_seq(fields, start_date, start_hour, lead_time,
+#                             log_precip=log_precip, norm=ifs_norm)
 
-    ifslong.close()
-    return ifs, nim
-
+#     ifslong.close()
+#     return ifs, nim
 
 
 def load_fcst_radar_batch(batch_dates,
@@ -163,7 +171,6 @@ def load_fcst_radar_batch(batch_dates,
                           start_time,
                           fcst_fields=all_fcst_fields,
                           log_precip=False,
-                          hour=0,
                           norm=False):
     '''
     Returns a temporal sequence of (forecast, truth, mask) data.
@@ -180,30 +187,19 @@ def load_fcst_radar_batch(batch_dates,
     batch_y = []  # radar
     batch_mask = []  # mask
 
-    if type(hour) == str:
-        if hour == 'random':
-            hours = fcst_hours[np.random.randint(len(fcst_hours), size=[len(batch_dates)])]
-        else:
-            assert False, f"Not configured for {hour}"
-    elif np.issubdtype(type(hour), np.integer):
-        hours = len(batch_dates)*[hour]
-    else:
-        hours = hour
-
-    for i, date in enumerate(batch_dates):
-        h = hours[i]
-        batch_x.append(load_fcst_stack(fcst_fields, date, h, log_precip=log_precip, norm=norm))
-        radar, mask = load_radar_and_mask(date, h, log_precip=log_precip)
+    for fcst_date in batch_dates:
+        batch_x.append(load_fcst_stack(fcst_fields, fcst_date, lead_time, length, start_time, log_precip=log_precip, norm=norm))
+        radar, mask = load_radar_and_mask(fcst_date, lead_time, length, start_time, log_precip=log_precip)
         batch_y.append(radar)
         batch_mask.append(mask)
-
     return np.array(batch_x), np.array(batch_y), np.array(batch_mask)
 
 
-def load_fcst(ifield, date, hour, log_precip=False, norm=False):
+def load_fcst(ifield, date, lead_time, length, start_time, log_precip=False, norm=False):
     # Get the time required (compensating for IFS forecast saving precip at the end of the timestep)
     time = datetime.datetime(year=int(date[:4]), month=int(date[4:6]), day=int(date[6:8]), hour=hour) + datetime.timedelta(hours=1)
 
+# REWRITE ALL THIS
     # Get the correct forecast starttime
     if time.hour < 6:
         tmpdate = time - datetime.timedelta(days=1)
@@ -260,10 +256,10 @@ def load_fcst(ifield, date, hour, log_precip=False, norm=False):
         return y
 
 
-def load_fcst_stack(fields, date, hour, log_precip=False, norm=False):
+def load_fcst_stack(fields, date, lead_time, length, start_time, log_precip=False, norm=False):
     field_arrays = []
     for f in fields:
-        field_arrays.append(load_fcst(f, date, hour, log_precip=log_precip, norm=norm))
+        field_arrays.append(load_fcst(f, date, lead_time, length, start_time, log_precip=log_precip, norm=norm))
     return np.stack(field_arrays, -1)
 
 

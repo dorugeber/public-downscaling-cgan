@@ -58,7 +58,7 @@ class DataGenerator(Sequence):
         else:
             self.constants = None
 
-        # get valid dates, where radar data exists
+        # get valid forecast dates, where radar data exists for the required period
         self.dates = get_dates(year, lead_time, length, start_time)
 
         if self.shuffle:
