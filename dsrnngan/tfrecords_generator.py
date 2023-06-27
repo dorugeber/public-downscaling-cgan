@@ -110,7 +110,6 @@ def create_dataset(years,
 
     files_ds = tf.data.Dataset.list_files(filelist)
     ds = tf.data.TFRecordDataset(files_ds,
-                                 compression_type="GZIP",
                                  num_parallel_reads=tf.data.AUTOTUNE)
     ds = ds.shuffle(shuffle_size)
     ds = ds.map(lambda x: _parse_batch(x,
