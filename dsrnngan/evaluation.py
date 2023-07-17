@@ -99,7 +99,7 @@ def eval_one_chkpt(*,
     ralsd_all = []
 
     data_gen_iter = iter(data_gen)
-    tpidx = 2*data.all_fcst_fields.index('tp')  # 2*idx has tp, 2*idx+1 is zeroes
+    tpidx = 2*data.all_fcst_fields.index('tp')  # 2*idx has tp ens mean
     batch_size = 1  # do one full-size image at a time
 
     if mode == "det":

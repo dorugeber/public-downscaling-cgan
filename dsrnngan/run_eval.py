@@ -10,7 +10,7 @@ import read_config
 read_config.set_gpu_mode()  # set up whether to use GPU, and mem alloc mode
 
 # input parameters
-log_folder = '/ppdata/andrew-output/ICPAC-baseline'; model_numbers = [156800]  # noqa: E702
+log_folder = '/ppdata/andrew-output/ICPAC-ensmean'; model_numbers = [160000]  # noqa: E702
 val_years = 2020
 
 model_weights_root = os.path.join(log_folder, "models")

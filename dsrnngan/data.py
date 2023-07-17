@@ -196,26 +196,26 @@ def load_fcst(field,
     year = int(yearstr)
     ds_path = os.path.join(FCST_PATH, yearstr, f"{field}.nc")
 
-    # open using netCDF [xarray refuses to open the data we generated, due to our sloppy naming conventions]
+    # open using netCDF
     nc_file = nc.Dataset(ds_path, mode="r")
-    all_data = nc_file[field]
+    all_data_mean = nc_file[f"{field}_mean"]
     # data is stored as [day of year, valid time index, lat, lon]
 
     # calculate first index (i.e., day of year, with Jan 1 = 0)
     fcst_date = datetime.datetime.strptime(date, "%Y%m%d").date()
     fcst_idx = fcst_date.toordinal() - datetime.date(year, 1, 1).toordinal()
 
-    # our data files are compressed over the last 3 indices; this
-    # might make things slightly faster by avoiding two decompressions?
-    temp_data = all_data[fcst_idx, time_idx:time_idx+2, :, :]
-
     if field in accumulated_fields:
-        data1 = temp_data[1, :, :] - temp_data[0, :, :]
+        # return mean, sd, 0, 0.  zero fields are so that each field returns a 4 x ny x nx array.
+        # accumulated fields have been pre-processed s.t. data[:, j, :, :] has accumulation between times j and j+1
+        data1 = all_data_mean[fcst_idx, time_idx, :, :]
         data2 = np.zeros(data1.shape)
         data = np.stack([data1, data2], axis=-1)
     else:
-        data1 = temp_data[0, :, :]
-        data2 = temp_data[1, :, :]
+        # return mean_start, sd_start, mean_end, sd_end
+        temp_data_mean = all_data_mean[fcst_idx, time_idx:time_idx+2, :, :]
+        data1 = temp_data_mean[0, :, :]
+        data2 = temp_data_mean[1, :, :]
         data = np.stack([data1, data2], axis=-1)
 
     nc_file.close()
@@ -242,7 +242,7 @@ def load_fcst(field,
             # already 0-1
             return data
         elif field in ["sp", "t2m"]:
-            # these are bounded well away from zero, so subtract mean
+            # these are bounded well away from zero, so subtract mean from ens mean
             return (data-fcst_norm[field]["mean"])/fcst_norm[field]["std"]
         elif field in nonnegative_fields:
             return data/fcst_norm[field]["max"]
@@ -309,10 +309,9 @@ def get_fcst_stats_fast(field, year=2018):
     nc_file = nc.Dataset(ds_path, mode="r")
 
     if field in accumulated_fields:
-        all_data = nc_file[field][:, :, :, :]
-        data = all_data[:, 1:, :, :] - all_data[:, :-1, :, :]
+        data = nc_file[f"{field}_mean"][:, :-1, :, :]  # last time_idx is full of zeros
     else:
-        data = nc_file[field][:, :, :, :]
+        data = nc_file[f"{field}_mean"][:, :, :, :]
 
     nc_file.close()
 

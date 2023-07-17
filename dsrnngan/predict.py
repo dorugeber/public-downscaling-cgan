@@ -100,6 +100,7 @@ assert problem_type == "normal"  # removed autocoarsen from this script
 autocoarsen = False
 plot_input_title = 'Forecast'
 input_channels = 2*len(all_fcst_fields)
+assert False  # need to change indices
 
 # load appropriate dataset
 data_predict = DataGeneratorFull(dates=dates,
@@ -139,8 +140,8 @@ gen.load_weights(weights_fn)
 #                                     shuffle=True,
 #                                     fcst_norm=False)
 
-tpidx = 2*all_fcst_fields.index('tp')  # 2*idx is tp, 2*idx+1 is zeroes
-cpidx = 2*all_fcst_fields.index('cp')
+tpidx_mean = 4*all_fcst_fields.index('tp')  # 4*idx is tp ens mean,
+tpidx_stdev = 4*all_fcst_fields.index('tp') + 1  # 4*idx+1 is tp ens stdev
 
 pred = []
 seq_real = []
@@ -161,8 +162,8 @@ for ii in range(num_samples):
     input_conditions = inputs['lo_res_inputs'].copy()
 
     # denormalise precip inputs for plotting
-    input_conditions[..., tpidx] = data.denormalise(inputs['lo_res_inputs'][..., tpidx])
-    input_conditions[..., cpidx] = data.denormalise(inputs['lo_res_inputs'][..., cpidx])
+    input_conditions[..., tpidx_mean] = data.denormalise(inputs['lo_res_inputs'][..., tpidx_mean])
+    input_conditions[..., tpidx_stdev] = data.denormalise(inputs['lo_res_inputs'][..., tpidx_stdev])
 
     seq_cond.append(input_conditions)
 
@@ -212,8 +213,8 @@ for ii in range(num_samples):
 for ii in range(num_samples):
     # len(seq_foo) = num_samples
     # seq[ii].shape = [NHWC], C=input_channels for cond, C=2 for const, C=1 for real, pred
-    fcst_total = seq_cond[ii][0, ..., tpidx]  # total precip
-    fcst_conv = seq_cond[ii][0, ..., cpidx]
+    fcst_total_mean = seq_cond[ii][0, ..., tpidx_mean]
+    fcst_total_stdev = seq_cond[ii][0, ..., tpidx_stdev]
 
     constant_0 = seq_const[ii][0, ..., 0]  # orog
     constant_0 *= 10000.0  # undo orography normalisation
@@ -225,8 +226,8 @@ for ii in range(num_samples):
 
     # bring precip plots away from 0, since colour scale is logarithmic, and 0 values
     # get confused with NaNs once the log is done
-    fcst_total = np.maximum(fcst_total, 1e-6)
-    fcst_conv = np.maximum(fcst_conv, 1e-6)
+    fcst_total_mean = np.maximum(fcst_total_mean, 1e-6)
+    fcst_total_stdev = np.maximum(fcst_total_stdev, 1e-6)
     truth = np.maximum(truth, 1e-6)
     pred_0 = np.maximum(pred_0, 1e-6)
     pred_mean = np.maximum(pred_mean, 1e-6)
@@ -251,24 +252,24 @@ for ii in range(num_samples):
     ax6 = plt.subplot(gs[1, 2], projection=ccrs.PlateCarree())
     ax = [ax1, ax2, ax3, ax4, ax5, ax6]
 
-    fcst_total_ax = ax[0].imshow(fcst_total,
+    fcst_tmean_ax = ax[0].imshow(fcst_total_mean,
                                  norm=colors.LogNorm(*value_range_precip),
                                  cmap=cmap, origin='lower', extent=extent,
                                  transform=ccrs.PlateCarree(), alpha=alpha)
-    ax[0].set_title("Forecast - tp")
+    ax[0].set_title("Forecast - tp mean")
     ax[0].coastlines(resolution='10m', color='black', linewidth=linewidth)
-    cbs.append(plt.colorbar(fcst_total_ax, ax=ax[0],
+    cbs.append(plt.colorbar(fcst_tmean_ax, ax=ax[0],
                             norm=colors.LogNorm(*value_range_precip),
                             orientation='horizontal',
                             fraction=0.035, pad=0.04))
 
-    fcst_conv_ax = ax[1].imshow(fcst_conv,
+    fcst_tstd_ax = ax[1].imshow(fcst_total_stdev,
                                 norm=colors.LogNorm(*value_range_precip),
                                 cmap=cmap, origin='lower', extent=extent,
                                 transform=ccrs.PlateCarree(), alpha=alpha)
-    ax[1].set_title('Forecast - cp')
+    ax[1].set_title('Forecast - tp stdev')
     ax[1].coastlines(resolution='10m', color='black', linewidth=linewidth)
-    cbs.append(plt.colorbar(fcst_conv_ax, ax=ax[1],
+    cbs.append(plt.colorbar(fcst_tstd_ax, ax=ax[1],
                             norm=colors.LogNorm(*value_range_precip),
                             orientation='horizontal',
                             fraction=0.035, pad=0.04))
@@ -341,7 +342,7 @@ if args.plot_all:
     for ii in range(num_samples):
         tmp = {}
         tmp['TRUTH'] = np.maximum(seq_real[ii][0, ..., 0], 1e-6)
-        tmp["Forecast"] = np.maximum(seq_cond[ii][0, ..., tpidx], 1e-6)
+        tmp["Forecast"] = np.maximum(seq_cond[ii][0, ..., tpidx_mean], 1e-6)
         tmp['dates'] = dates_save[ii]
         tmp['time_idxs'] = hours_save[ii]
         for jj in range(pred_ensemble_size):
