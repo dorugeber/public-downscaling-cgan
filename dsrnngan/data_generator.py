@@ -11,10 +11,11 @@ class DataGenerator(Sequence):
     '''
     Data generator class that returns (forecast, constants, mask, truth) data. Class will return forecast data at the start and end of each interval (for non-accumulated fields) and accumulated fields over the interval.  The truth data is averaged over the interval.
 
-    DataGenerator(["20180409", "20200607"], fcst_fields=["cape", "tp"], start_hour=12, end_hour=24) will return data over two periods: 12-18 and 18-24 hours for the forecasts initialised on 20180409 and 20200607.
+    DataGenerator(["20180409", "20200607"], fcst_fields=["cape", "tp"], seq_length=4, start_hour=12, end_hour=48) will return data over three periods: 12-36, 18-42, and 24-48 hours (in 6-hour chunks) for the forecasts initialised on 20180409 and 20200607.
     '''
     def __init__(self, dates, fcst_fields,
                  start_hour=0, end_hour=168,
+                 seq_length=8,
                  batch_size=1, log_precip=True,
                  shuffle=True, constants=True, fcst_norm=True,
                  autocoarsen=False, seed=9999):
@@ -28,6 +29,7 @@ class DataGenerator(Sequence):
             fcst_fields (list of strings): The forecast fields to be used
             start_hour (int): Lead time of first forecast/truth hour to use
             end_hour (int): Lead time of last forecast/truth hour to use
+            seq_length (int): Number of forecasts in sequence
             batch size (int): Batch size
             log_precip (bool): Whether to apply log10(1+x) transform to precip-related fields
             shuffle (bool): Whether to shuffle data (else return sorted by date then lead time)
@@ -42,9 +44,10 @@ class DataGenerator(Sequence):
         assert end_hour <= 168
         assert start_hour % HOURS == 0
         assert end_hour % HOURS == 0
-        assert end_hour > start_hour
+        assert end_hour >= start_hour + seq_length*HOURS
         assert autocoarsen is False  # untested, probably not useful in this project
 
+        self.seq_length = seq_length
         self.fcst_fields = fcst_fields
         self.batch_size = batch_size
         self.log_precip = log_precip
@@ -59,15 +62,17 @@ class DataGenerator(Sequence):
             self.ds_factor = df_dict["downscaling_factor"]
 
         if constants:
-            self.constants = load_hires_constants(self.batch_size)
+            self.constants = load_hires_constants()  # H x W x channels
+            self.constants = np.repeat(self.constants[np.newaxis, ...], seq_length, axis=0)  # shape T x H x W x channels
+            self.constants = np.repeat(self.constants[np.newaxis, ...], batch_size, axis=0)  # shape batch_size x T x H x W x channels
         else:
             self.constants = None
 
         # convert to numpy array for easy use of np.repeat
         temp_dates = np.array(dates)
 
-        # represent valid lead-time intervals, 0 = 0-6 hours, 1 = 6-12 hours, 2 = 12-18 hours etc
-        temp_time_idxs = np.arange(start_hour//HOURS, end_hour//HOURS)
+        # represent valid lead-time intervals, 0 = 0-6 hours, 1 = 6-12 hours, 2 = 12-18 hours etc. The first interval of the sequence is used.
+        temp_time_idxs = np.arange(start_hour//HOURS, end_hour//HOURS + 1 - seq_length)
 
         # if no shuffle, the DataGenerator will return each interval from the
         # first date, then each interval from the second date, etc.
@@ -97,6 +102,7 @@ class DataGenerator(Sequence):
         data_x_batch, data_y_batch, data_mask_batch = load_fcst_truth_batch(
             dates_batch,
             time_idx_batch,
+            self.seq_length,
             fcst_fields=self.fcst_fields,
             log_precip=self.log_precip,
             norm=self.fcst_norm)

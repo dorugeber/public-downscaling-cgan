@@ -5,14 +5,14 @@ EWC:
         CONSTANTS_PATH: '/flooddata/constants-regICPAC-meansd'
 
     TFRecords:
-        tfrecords_path: '/flooddata/tfrecords-regICPAC-meansd'
+        tfrecords_path: '/ppdata/tfrecords-ICPAC-time'
 
 
-LOCATION2:
+AOPP:
     GENERAL:
         TRUTH_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/IMERG-regICPAC-6hr'
         FORECAST_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/IFS-regICPAC-meansd'
         CONSTANTS_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/constants-regICPAC-meansd'
 
     TFRecords:
-        tfrecords_path: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/tfrecords-regICPAC-meansd'
+        tfrecords_path: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/tfrecords-ICPAC-time'

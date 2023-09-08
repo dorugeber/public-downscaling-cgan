@@ -55,6 +55,7 @@ def get_dates(year,
         year (int): forecasts starting in this year
         start_hour (int): Lead time of first forecast desired
         end_hour (int): Lead time of last forecast desired
+        seq_length (int): Length of forecast sequence, in frames
     '''
     # sanity checks for our dataset
     assert year in (2018, 2019, 2020, 2021)
@@ -104,29 +105,40 @@ def get_dates(year,
 
 def load_truth_and_mask(date,
                         time_idx,
+                        seq_length,
                         log_precip=False):
     '''
-    Returns a single (truth, mask) item of data.
+    Returns a single (truth, mask) sequence of data.
     Parameters:
         date: forecast start date
-        time_idx: forecast 'valid time' array index
+        time_idx: forecast 'valid time' array index of first frame
+        seq_length: length of sequence, in frames
         log_precip: whether to apply log10(1+x) transformation
     '''
-    # convert date and time_idx to get the correct truth file
+    # convert date and time_idx to get the correct truth files
     fcst_date = datetime.datetime.strptime(date, "%Y%m%d")
-    valid_dt = fcst_date + datetime.timedelta(hours=int(time_idx)*HOURS)  # needs to change for 12Z forecasts
-    fname = valid_dt.strftime('%Y%m%d_%H')
-    data_path = os.path.join(TRUTH_PATH, f"{fname}.nc4")
+    ys = []
+    masks = []
 
-    ds = xr.open_dataset(data_path)
-    da = ds["precipitationCal"]
-    y = da.values
-    ds.close()
+    for ii in range(seq_length):
+        valid_dt = fcst_date + datetime.timedelta(hours=int(time_idx+ii)*HOURS)  # needs to change for 12Z forecasts
+        fname = valid_dt.strftime('%Y%m%d_%H')
+        data_path = os.path.join(TRUTH_PATH, f"{fname}.nc4")
 
-    # mask: False for valid truth data, True for invalid truth data
-    # (compatible with the NumPy masked array functionality)
-    # if all data is valid:
-    mask = np.full(y.shape, False, dtype=bool)
+        ds = xr.open_dataset(data_path)
+        da = ds["precipitationCal"]
+        y = da.values  # shape H x W
+        ys.append(y)  # don't just do ys.append(da.values), since we want shape
+        ds.close()  # to create the mask, a few lines below
+
+        # mask: False for valid truth data, True for invalid truth data
+        # (compatible with the NumPy masked array functionality)
+        # if all data is valid:
+        mask = np.full(y.shape, False, dtype=bool)
+        masks.append(mask)
+
+    y = np.array(ys)  # shape T x H x W
+    mask = np.array(masks)
 
     if log_precip:
         return np.log10(1+y), mask
@@ -134,7 +146,7 @@ def load_truth_and_mask(date,
         return y, mask
 
 
-def load_hires_constants(batch_size=1):
+def load_hires_constants():
     oro_path = os.path.join(CONSTANTS_PATH, "elev.nc")
     df = xr.load_dataset(oro_path)
     # Orography in m.  Divide by 10,000 to give O(1) normalisation
@@ -148,12 +160,12 @@ def load_hires_constants(batch_size=1):
     lsm = df["lsm"].values
     df.close()
 
-    temp = np.stack([z, lsm], axis=-1)  # shape H x W x 2
-    return np.repeat(temp[np.newaxis, ...], batch_size, axis=0)  # shape batch_size x H x W x 2
+    return np.stack([z, lsm], axis=-1)  # shape H x W x 2
 
 
 def load_fcst_truth_batch(dates_batch,
                           time_idx_batch,
+                          seq_length,
                           fcst_fields=all_fcst_fields,
                           log_precip=False,
                           norm=False):
@@ -161,7 +173,8 @@ def load_fcst_truth_batch(dates_batch,
     Returns a batch of (forecast, truth, mask) data, although usually the batch size is 1
     Parameters:
         dates_batch (iterable of strings): Dates of forecasts
-        time_idx_batch (iterable of ints): Corresponding 'valid_time' array indices
+        time_idx_batch (iterable of ints): Corresponding 'valid_time' array indices of first frame
+        seq_length (int): Length of forecast/truth series, in frames
         fcst_fields (list of strings): The fields to be used
         log_precip (bool): Whether to apply log10(1+x) transform to precip-related forecast fields, and truth
         norm (bool): Whether to apply normalisation to forecast fields to make O(1)
@@ -171,8 +184,8 @@ def load_fcst_truth_batch(dates_batch,
     batch_mask = []  # mask
 
     for time_idx, date in zip(time_idx_batch, dates_batch):
-        batch_x.append(load_fcst_stack(fcst_fields, date, time_idx, log_precip=log_precip, norm=norm))
-        truth, mask = load_truth_and_mask(date, time_idx, log_precip=log_precip)
+        batch_x.append(load_fcst_stack(fcst_fields, date, time_idx, seq_length, log_precip=log_precip, norm=norm))
+        truth, mask = load_truth_and_mask(date, time_idx, seq_length, log_precip=log_precip)
         batch_y.append(truth)
         batch_mask.append(mask)
 
@@ -182,14 +195,15 @@ def load_fcst_truth_batch(dates_batch,
 def load_fcst(field,
               date,
               time_idx,
+              seq_length,
               log_precip=False,
               norm=False):
     '''
-    Returns forecast field data for the given date and time interval.
+    Returns forecast field data for the given date and time intervals.
 
-    Two channels are returned for each field:
-        - instantaneous fields: field at the start and end of the interval
-        - accumulated field: increment over the interval, and the second channel is all 0
+    Four channels are returned for each field:
+        - instantaneous fields: mean and standard deviation of the field, at the start and end of the interval
+        - accumulated field: mean and standard deviation of increment over the interval, and the last two channels are all 0
     '''
 
     yearstr = date[:4]
@@ -207,20 +221,20 @@ def load_fcst(field,
     fcst_idx = fcst_date.toordinal() - datetime.date(year, 1, 1).toordinal()
 
     if field in accumulated_fields:
-        # return mean, sd, 0, 0.  zero fields are so that each field returns a 4 x ny x nx array.
+        # return (mean, sd, 0, 0) for each time.  zero fields are so that each field returns 4 channels (T x H x W x 4)
         # accumulated fields have been pre-processed s.t. data[:, j, :, :] has accumulation between times j and j+1
-        data1 = all_data_mean[fcst_idx, time_idx, :, :]
-        data2 = all_data_sd[fcst_idx, time_idx, :, :]
+        data1 = all_data_mean[fcst_idx, time_idx:time_idx+seq_length, :, :]
+        data2 = all_data_sd[fcst_idx, time_idx:time_idx+seq_length, :, :]
         data3 = np.zeros(data1.shape)
         data = np.stack([data1, data2, data3, data3], axis=-1)
     else:
-        # return mean_start, sd_start, mean_end, sd_end
-        temp_data_mean = all_data_mean[fcst_idx, time_idx:time_idx+2, :, :]
-        temp_data_sd = all_data_sd[fcst_idx, time_idx:time_idx+2, :, :]
-        data1 = temp_data_mean[0, :, :]
-        data2 = temp_data_sd[0, :, :]
-        data3 = temp_data_mean[1, :, :]
-        data4 = temp_data_sd[1, :, :]
+        # return mean_start, sd_start, mean_end, sd_end, for each time (T x H x W x 4)
+        temp_data_mean = all_data_mean[fcst_idx, time_idx:time_idx+seq_length+1, :, :]
+        temp_data_sd = all_data_sd[fcst_idx, time_idx:time_idx+seq_length+1, :, :]
+        data1 = temp_data_mean[:-1, :, :]
+        data2 = temp_data_sd[:-1, :, :]
+        data3 = temp_data_mean[1:, :, :]
+        data4 = temp_data_sd[1:, :, :]
         data = np.stack([data1, data2, data3, data4], axis=-1)
 
     nc_file.close()
@@ -248,8 +262,8 @@ def load_fcst(field,
             return data
         elif field in ["sp", "t2m"]:
             # these are bounded well away from zero, so subtract mean from ens mean (but NOT from ens sd!)
-            data[:, :, 0] -= fcst_norm[field]["mean"]
-            data[:, :, 2] -= fcst_norm[field]["mean"]
+            data[..., 0] -= fcst_norm[field]["mean"]
+            data[..., 2] -= fcst_norm[field]["mean"]
             return data/fcst_norm[field]["std"]
         elif field in nonnegative_fields:
             return data/fcst_norm[field]["max"]
@@ -263,16 +277,17 @@ def load_fcst(field,
 def load_fcst_stack(fields,
                     date,
                     time_idx,
+                    seq_length,
                     log_precip=False,
                     norm=False):
     '''
-    Returns forecast fields, for the given date and time interval.
-    Each field returned by load_fcst has two channels (see load_fcst for details),
-    then these are concatentated to form an array of H x W x 4*len(fields)
+    Returns forecast fields, for the given date and time intervals.
+    Each field returned by load_fcst has four channels (see load_fcst for details),
+    then these are concatentated to form an array of T x H x W x 4*len(fields)
     '''
     field_arrays = []
     for f in fields:
-        field_arrays.append(load_fcst(f, date, time_idx, log_precip=log_precip, norm=norm))
+        field_arrays.append(load_fcst(f, date, time_idx, seq_length, log_precip=log_precip, norm=norm))
     return np.concatenate(field_arrays, axis=-1)
 
 

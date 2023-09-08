@@ -8,11 +8,13 @@ import seaborn as sns
 from matplotlib.colors import ListedColormap
 from matplotlib import pyplot as plt
 from matplotlib import colorbar, colors, gridspec
+from matplotlib.backends.backend_pdf import PdfPages
 
 import data
 from noise import NoiseGenerator
 from rapsd import plot_spectrum1d, rapsd
 from thresholded_ranks import findthresh
+from tfrecords_generator import SEQ_LENGTH
 
 path = os.path.dirname(os.path.abspath(__file__))
 
@@ -67,20 +69,23 @@ def plot_sequences(gen,
                    ens_size=4,
                    out_fn=None):
 
+    if out_fn is not None:
+        # create a PdfPages object to save multiple plots to same pdf
+        pdf = PdfPages(out_fn)
+
     data_gen_iter = iter(data_gen)
 
-    num_rows = num_cases
+    num_rows = SEQ_LENGTH
     num_cols = 2+ens_size
 
     figsize = (num_cols*1.5, num_rows*1.5)
-    plt.figure(figsize=figsize)
-
-    gs = gridspec.GridSpec(num_rows, num_cols,
-                           wspace=0.05, hspace=0.05)
-
     value_range = (0, 5)
 
-    for kk in range(num_cases):
+    for jj in range(num_cases):
+        plt.figure(figsize=figsize)
+        gs = gridspec.GridSpec(num_rows, num_cols,
+                               wspace=0.05, hspace=0.05)
+
         inputs, outputs = next(data_gen_iter)
         cond = inputs['lo_res_inputs']
         const = inputs['hi_res_inputs']
@@ -110,31 +115,35 @@ def plot_sequences(gen,
         cond = data.denormalise(cond)
         seq_gen = [data.denormalise(seq) for seq in seq_gen]
 
-        # plot truth
-        plt.subplot(gs[kk, 0])
-        plot_img(seq_real[0, :, :], value_range=value_range)
+        for kk in range(SEQ_LENGTH):
+            # plot truth
+            plt.subplot(gs[kk, 0])
+            plot_img(seq_real[0, kk, :, :], value_range=value_range)
 
-        # plot network input precip field
-        plt.subplot(gs[kk, 1])
-        # hacky - don't know if we're in autocoarsen mode at this point.
-        # if cond (network input) has more than one channel, look for 'tp',
-        # else just plot the data we have (e.g., coarsened truth)
-        if cond.shape[-1] > 1:
-            tpidx = 4*data.all_fcst_fields.index('tp')
-        else:
-            tpidx = 0
-        plot_img(cond[0, :, :, tpidx], value_range=value_range)
+            # plot network input precip field
+            plt.subplot(gs[kk, 1])
+            # hacky - don't know if we're in autocoarsen mode at this point.
+            # if cond (network input) has more than one channel, look for 'tp',
+            # else just plot the data we have (e.g., coarsened truth)
+            if cond.shape[-1] > 1:
+                tpidx = 4*data.all_fcst_fields.index('tp')
+            else:
+                tpidx = 0
+            plot_img(cond[0, kk, :, :, tpidx], value_range=value_range)
 
-        # plot generated samples
-        for ll in range(ens_size):
-            plt.subplot(gs[kk, ll+2])
-            plot_img(seq_gen[ll][0, :, :, 0], value_range=value_range)
+            # plot generated samples
+            for ll in range(ens_size):
+                plt.subplot(gs[kk, ll+2])
+                plot_img(seq_gen[ll][0, kk, :, :, 0], value_range=value_range)
 
-    plt.suptitle('Checkpoint ' + str(checkpoint))
+        if kk == 0:
+            plt.suptitle('Checkpoint ' + str(checkpoint))
 
-    if out_fn is not None:
-        plt.savefig(out_fn, bbox_inches='tight')
+        if out_fn is not None:
+            pdf.savefig(plt.gcf())
         plt.close()
+    if out_fn is not None:
+        pdf.close()
 
 
 def plot_rank_histogram(ax, ranks, N_ranks=101, **plot_params):

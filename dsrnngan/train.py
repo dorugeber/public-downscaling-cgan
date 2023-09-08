@@ -14,21 +14,22 @@ def train_model(*,
                 num_cases=8,
                 plot_fn=None):
 
+    # this just sniffs out what shape the noise array should be
     for inputs, _ in batch_gen_train.take(1).as_numpy_iterator():
         cond = inputs["lo_res_inputs"]
-        img_shape = cond.shape[1:-1]
+        img_shape = cond.shape[1:-1]  # discard batch size and channels
         batch_size = cond.shape[0]
     del cond
     del inputs
 
     if mode == 'GAN':
-        noise_shape = (img_shape[0], img_shape[1], noise_channels)
+        noise_shape = img_shape + (noise_channels,)
         noise_gen = noise.NoiseGenerator(noise_shape, batch_size=batch_size)
         loss_log = model.train(batch_gen_train, noise_gen,
                                steps_per_checkpoint, training_ratio=2)
 
     elif mode == 'VAEGAN':
-        noise_shape = (img_shape[0], img_shape[1], latent_variables)
+        noise_shape = img_shape + (latent_variables,)
         noise_gen = noise.NoiseGenerator(noise_shape, batch_size=batch_size)
         loss_log = model.train(batch_gen_train, noise_gen,
                                steps_per_checkpoint, training_ratio=2)

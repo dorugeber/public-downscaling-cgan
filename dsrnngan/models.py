@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import concatenate, Conv2D, Dense, GlobalAveragePooling2D
-from tensorflow.keras.layers import Input, LeakyReLU, UpSampling2D
+from tensorflow.keras.layers import Input, LeakyReLU, UpSampling2D, ConvLSTM2D, TimeDistributed
 
 from blocks import residual_block, const_upscale_block
 
@@ -22,14 +22,14 @@ def generator(mode,
     forceconv = True if arch in ("forceconv", "forceconv-long") else False
     # Network inputs
     # low resolution condition
-    generator_input = Input(shape=(None, None, input_channels), name="lo_res_inputs")
+    generator_input = Input(shape=(None, None, None, input_channels), name="lo_res_inputs")
     # print(f"generator_input shape: {generator_input.shape}")
     # constant fields
-    const_input = Input(shape=(None, None, constant_fields), name="hi_res_inputs")
+    const_input = Input(shape=(None, None, None, constant_fields), name="hi_res_inputs")
     # print(f"constants_input shape: {const_input.shape}")
 
     # Convolve constant fields down to match other input dimensions
-    upscaled_const_input = const_upscale_block(const_input, steps=downscaling_steps, filters=filters_gen)
+    upscaled_const_input = const_upscale_block(const_input, time_dist=True, steps=downscaling_steps, filters=filters_gen)
     # print(f"upscaled constants shape: {upscaled_const_input.shape}")
 
     if mode in ('det', 'VAEGAN'):
@@ -37,7 +37,7 @@ def generator(mode,
         generator_output = concatenate([generator_input, upscaled_const_input])
     elif mode == 'GAN':
         # noise
-        noise_input = Input(shape=(None, None, noise_channels), name="noise_input")
+        noise_input = Input(shape=(None, None, None, noise_channels), name="noise_input")
         # print(f"noise_input shape: {noise_input.shape}")
         # Concatenate all inputs together
         generator_output = concatenate([generator_input, upscaled_const_input, noise_input])
@@ -45,19 +45,19 @@ def generator(mode,
 
     # Pass through 3 residual blocks
     for ii in range(3):
-        generator_output = residual_block(generator_output, filters=filters_gen, conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+        generator_output = residual_block(generator_output, filters=filters_gen, conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
     # print('End of first residual block')
     # print(f"Shape after first residual block: {generator_output.shape}")
 
     if mode == 'VAEGAN':
         # encoder model and outputs
-        means = Conv2D(filters=latent_variables, kernel_size=1, activation=LeakyReLU(alpha=relu_alpha), padding="valid")(generator_output)
-        logvars = Conv2D(filters=latent_variables, kernel_size=1, activation=LeakyReLU(alpha=relu_alpha), padding="valid")(generator_output)
+        means = TimeDistributed(Conv2D(filters=latent_variables, kernel_size=1, activation=LeakyReLU(alpha=relu_alpha), padding="valid"))(generator_output)
+        logvars = TimeDistributed(Conv2D(filters=latent_variables, kernel_size=1, activation=LeakyReLU(alpha=relu_alpha), padding="valid"))(generator_output)
         encoder_model = Model(inputs=[generator_input, const_input], outputs=[means, logvars], name='encoder')
         # decoder model and inputs
-        mean_input = tf.keras.layers.Input(shape=(None, None, latent_variables), name="mean_input")
-        logvar_input = tf.keras.layers.Input(shape=(None, None, latent_variables), name="logvar_input")
-        noise_input = Input(shape=(None, None, latent_variables), name="noise_input")
+        mean_input = tf.keras.layers.Input(shape=(None, None, None, latent_variables), name="mean_input")
+        logvar_input = tf.keras.layers.Input(shape=(None, None, None, latent_variables), name="logvar_input")
+        noise_input = Input(shape=(None, None, None, latent_variables), name="noise_input")
         # Generate random variables from mean & logvar
         generator_output = tf.multiply(noise_input, tf.exp(logvar_input * .5)) + mean_input
         # print(f"Shape of random variables: {generator_output.shape}")
@@ -67,17 +67,22 @@ def generator(mode,
     if arch == "forceconv-long":
         # Pass through 3 more residual blocks
         for ii in range(3):
-            generator_output = residual_block(generator_output, filters=filters_gen, conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+            generator_output = residual_block(generator_output, filters=filters_gen, conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
         # print('End of extra low-res residual blocks')
         # print(f"Shape after extra low-res residual blocks: {generator_output.shape}")
 
+    # ConvLSTM block to facilitate coherence in time
+    generator_output = ConvLSTM2D(filters=filters_gen, kernel_size=conv_size, padding="same", activation=LeakyReLU(alpha=relu_alpha), return_sequences=True)(generator_output)
+    # TODO: padding="same" pads with zeroes s.t. the output of the convolution has the same size as the input
+    # find a way to change this to reflect padding, like we use everywhere else?
+
     # Upsampling from low-res to high-res with alternating residual blocks
     # In the paper, this was [2*filters_gen, filters_gen] for steps of 5 and 2
-    block_channels = [2*filters_gen]*(len(downscaling_steps)-1) + [filters_gen]
+    block_channels = [filters_gen]*len(downscaling_steps)
     for ii, step in enumerate(downscaling_steps):
-        generator_output = UpSampling2D(size=(step, step), interpolation='bilinear')(generator_output)
+        generator_output = TimeDistributed(UpSampling2D(size=(step, step), interpolation='bilinear'))(generator_output)
         # print(f"Shape after upsampling step {ii+1}: {generator_output.shape}")
-        generator_output = residual_block(generator_output, filters=block_channels[ii], conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+        generator_output = residual_block(generator_output, filters=block_channels[ii], conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
         # print(f"Shape after residual block: {generator_output.shape}")
 
     # Concatenate with original size constants field
@@ -86,11 +91,11 @@ def generator(mode,
 
     # Pass through 3 residual blocks
     for ii in range(3):
-        generator_output = residual_block(generator_output, filters=filters_gen, conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+        generator_output = residual_block(generator_output, filters=filters_gen, conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
     # print(f"Shape after third residual block: {generator_output.shape}")
 
     # Output layer
-    generator_output = Conv2D(filters=1, kernel_size=(1, 1), activation='softplus', name="output")(generator_output)
+    generator_output = TimeDistributed(Conv2D(filters=1, kernel_size=(1, 1), activation='softplus', name="output"))(generator_output)
     # print(f"Output shape: {generator_output.shape}")
 
     if mode == 'VAEGAN':
@@ -118,17 +123,17 @@ def discriminator(arch,
     forceconv = True if arch in ("forceconv", "forceconv-long") else False
     # Network inputs
     # low resolution condition
-    generator_input = Input(shape=(None, None, input_channels), name="lo_res_inputs")
+    generator_input = Input(shape=(None, None, None, input_channels), name="lo_res_inputs")
     # print(f"generator_input shape: {generator_input.shape}")
     # constant fields
-    const_input = Input(shape=(None, None, constant_fields), name="hi_res_inputs")
+    const_input = Input(shape=(None, None, None, constant_fields), name="hi_res_inputs")
     # print(f"constants_input shape: {const_input.shape}")
     # target image
-    generator_output = Input(shape=(None, None, 1), name="output")
+    generator_output = Input(shape=(None, None, None, 1), name="output")
     # print(f"generator_output shape: {generator_output.shape}")
 
     # convolve down constant fields to match ERA
-    lo_res_const_input = const_upscale_block(const_input, steps=downscaling_steps, filters=filters_disc)
+    lo_res_const_input = const_upscale_block(const_input, time_dist=True, steps=downscaling_steps, filters=filters_disc)
     # print(f"upscaled constants shape: {lo_res_const_input.shape}")
 
     # concatenate constants to lo-res input
@@ -141,14 +146,14 @@ def discriminator(arch,
 
     # encode inputs using residual blocks
     # In the paper, this was [filters_disc, 2*filters_disc] for steps of 5 and 2
-    block_channels = [filters_disc]*(len(downscaling_steps)-1) + [2*filters_disc]
+    block_channels = [filters_disc]*len(downscaling_steps)
 
     for ii, step in enumerate(downscaling_steps):
-        lo_res_input = residual_block(lo_res_input, filters=block_channels[ii], conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+        lo_res_input = residual_block(lo_res_input, filters=block_channels[ii], conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
         # print(f"Shape of lo-res input after residual block: {lo_res_input.shape}")
-        hi_res_input = Conv2D(filters=block_channels[ii], kernel_size=(step, step), strides=step, padding="valid", activation="relu")(hi_res_input)
+        hi_res_input = TimeDistributed(Conv2D(filters=block_channels[ii], kernel_size=(step, step), strides=step, padding="valid", activation="relu"))(hi_res_input)
         # print(f"Shape of hi_res_input after upsampling step {ii+1}: {hi_res_input.shape}")
-        hi_res_input = residual_block(hi_res_input, filters=block_channels[ii], conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+        hi_res_input = residual_block(hi_res_input, filters=block_channels[ii], conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
         # print(f"Shape of hi-res input after residual block: {hi_res_input.shape}")
 
     # concatenate hi- and lo-res inputs channel-wise before passing through discriminator
@@ -156,18 +161,21 @@ def discriminator(arch,
     # print(f"Shape after concatenating lo-res input and hi-res input: {disc_input.shape}")
 
     # encode in residual blocks
-    disc_input = residual_block(disc_input, filters=filters_disc, conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
-    disc_input = residual_block(disc_input, filters=filters_disc, conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
-    disc_input = residual_block(disc_input, filters=filters_disc, conv_size=conv_size, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+    disc_input = residual_block(disc_input, filters=filters_disc, conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+    disc_input = residual_block(disc_input, filters=filters_disc, conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
+    disc_input = residual_block(disc_input, filters=filters_disc, conv_size=conv_size, time_dist=True, stride=1, relu_alpha=relu_alpha, norm=norm, padding=padding, force_1d_conv=forceconv)
     # print(f"Shape after residual block: {disc_input.shape}")
     # print('End of second residual block')
 
+    # ConvLSTM block to facilitate coherence in time
+    disc_input = ConvLSTM2D(filters=filters_disc, kernel_size=conv_size, padding="same", activation=LeakyReLU(alpha=relu_alpha), return_sequences=True)(disc_input)
+
     # discriminator output
-    disc_output = GlobalAveragePooling2D()(disc_input)
+    disc_output = TimeDistributed(GlobalAveragePooling2D())(disc_input)
     # print(f"discriminator output shape after pooling: {disc_output.shape}")
-    disc_output = Dense(64, activation='relu')(disc_output)
+    disc_output = TimeDistributed(Dense(64, activation='relu'))(disc_output)
     # print(f"discriminator output shape: {disc_output.shape}")
-    disc_output = Dense(1, name="disc_output")(disc_output)
+    disc_output = TimeDistributed(Dense(1, name="disc_output"))(disc_output)
     # print(f"discriminator output shape: {disc_output.shape}")
 
     disc = Model(inputs=[generator_input, const_input, generator_output], outputs=disc_output, name='disc')

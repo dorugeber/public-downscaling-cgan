@@ -171,12 +171,13 @@ class WGANGP(object):
         for inputs, _ in batch_gen.take(1).as_numpy_iterator():
             tmp_batch = inputs["lo_res_inputs"]
             batch_size = tmp_batch.shape[0]
+            num_frames = tmp_batch.shape[1]
         del tmp_batch
         del inputs
         if show_progress:
             # Initialize progbar and batch counter
             progbar = generic_utils.Progbar(num_gen_batches*batch_size)
-        disc_target_real = np.ones((batch_size, 1), dtype=np.float32)
+        disc_target_real = np.ones((batch_size, num_frames, 1), dtype=np.float32)
         disc_target_fake = -disc_target_real
         gen_target = disc_target_real
         target_gp = np.zeros((batch_size, 1), dtype=np.float32)

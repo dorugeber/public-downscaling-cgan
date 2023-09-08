@@ -14,9 +14,10 @@ records_folder = data_paths["TFRecords"]["tfrecords_path"]
 ds_fac = read_config.read_downscaling_factor()["downscaling_factor"]
 
 CLASSES = 4
-DEFAULT_FCST_SHAPE = (128, 128, 4*len(all_fcst_fields))
-DEFAULT_CON_SHAPE = (128, 128, 2)
-DEFAULT_OUT_SHAPE = (128, 128, 1)
+SEQ_LENGTH = 8  # train on sequences of length 8 - this is what Leinonen used, may wish to vary in the future!
+DEFAULT_FCST_SHAPE = (SEQ_LENGTH, 64, 64, 4*len(all_fcst_fields))
+DEFAULT_CON_SHAPE = (SEQ_LENGTH, 64, 64, 2)
+DEFAULT_OUT_SHAPE = (SEQ_LENGTH, 64, 64, 1)
 
 
 def DataGenerator(years, batch_size, repeat=True, autocoarsen=False, weights=None):
@@ -159,7 +160,7 @@ def _float_feature(list_of_floats):  # float32
 def write_data(year,
                folder=records_folder,
                fcst_fields=all_fcst_fields,
-               img_chunk_width=DEFAULT_FCST_SHAPE[0],  # controls size of subsampled image
+               img_chunk_width=DEFAULT_FCST_SHAPE[1],  # controls size of subsampled image
                num_class=CLASSES,
                log_precip=True,
                fcst_norm=True):
@@ -171,20 +172,20 @@ def write_data(year,
     img_size_w = 352
 
     # binning: bin 0 is sample mean rainfall < 0.2mm/hr, bin 1 is 0.2-0.3mm/hr, etc
-    bins = [0.2, 0.3, 0.45]
+    bins = [0.2, 0.3, 0.45]  # not updated for multiple frames yet
     assert num_class == 4
 
     scaling_factor = ds_fac
 
     # chosen to approximately cover the full image, but can be changed!
-    nsamples = img_size_h*img_size_w//(img_chunk_width**2)
+    nsamples = 1  # img_size_h*img_size_w//(img_chunk_width**2)
     print("Samples per image:", nsamples)  # note, actual samples may be less than this if mask is used to exclude some
 
     # split TFRecords by lead time, in case this is useful for training on subsets of lead time
-    for time_idx in range(28):
+    for time_idx in range(28 + 1 - SEQ_LENGTH):
         print(f"Doing time index {time_idx}")
         s_hour = time_idx*HOURS
-        e_hour = (time_idx + 1)*HOURS
+        e_hour = (time_idx + SEQ_LENGTH)*HOURS
         dates = get_dates(year,
                           start_hour=s_hour,
                           end_hour=e_hour)
@@ -192,11 +193,13 @@ def write_data(year,
                                 fcst_fields=fcst_fields,
                                 start_hour=s_hour,
                                 end_hour=e_hour,
+                                seq_length=SEQ_LENGTH,
                                 batch_size=1,
                                 log_precip=log_precip,
-                                shuffle=False,
+                                shuffle=True,
                                 constants=True,
-                                fcst_norm=fcst_norm)
+                                fcst_norm=fcst_norm,
+                                seed=9999+time_idx)
 
         fle_hdles = []
         for fh in range(num_class):
@@ -207,7 +210,7 @@ def write_data(year,
 
         for batch in range(len(dgc)):
             if (batch % 10) == 0:
-                print(time_idx, batch)
+                print(time_idx, batch, len(dgc))
             sample = dgc.__getitem__(batch)
 
             for ii in range(nsamples):
@@ -216,6 +219,7 @@ def write_data(year,
                 idw = random.randint(0, img_size_w-img_chunk_width)
 
                 mask = sample[1]['mask'][0,
+                                         :,
                                          idh*scaling_factor:(idh+img_chunk_width)*scaling_factor,
                                          idw*scaling_factor:(idw+img_chunk_width)*scaling_factor].flatten()
                 if np.any(mask):
@@ -223,13 +227,16 @@ def write_data(year,
                     continue
 
                 truth = sample[1]['output'][0,
+                                            :,
                                             idh*scaling_factor:(idh+img_chunk_width)*scaling_factor,
                                             idw*scaling_factor:(idw+img_chunk_width)*scaling_factor].flatten()
                 const = sample[0]['hi_res_inputs'][0,
+                                                   :,
                                                    idh*scaling_factor:(idh+img_chunk_width)*scaling_factor,
                                                    idw*scaling_factor:(idw+img_chunk_width)*scaling_factor,
                                                    :].flatten()
                 forecast = sample[0]['lo_res_inputs'][0,
+                                                      :,
                                                       idh:idh+img_chunk_width,
                                                       idw:idw+img_chunk_width,
                                                       :].flatten()
