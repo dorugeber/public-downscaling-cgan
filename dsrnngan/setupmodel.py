@@ -1,6 +1,6 @@
 import gc
 
-from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers.legacy import Adam
 
 import deterministic
 import gan

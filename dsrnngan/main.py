@@ -2,6 +2,7 @@ import argparse
 import gc
 import json
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # suppress TF debug message spam in v2.12
 import yaml
 from pathlib import Path
 

@@ -93,10 +93,10 @@ def plot_sequences(gen,
             for ii in range(ens_size):
                 noise_shape = cond[0, ..., 0].shape + (noise_channels,)
                 noise_gen = NoiseGenerator(noise_shape, batch_size=batch_size)
-                seq_gen.append(gen.predict([cond, const, noise_gen()]))
+                seq_gen.append(gen.predict([cond, const, noise_gen()], verbose=0))
         elif mode == 'det':
             for ii in range(ens_size):
-                seq_gen.append(gen.predict([cond, const]))
+                seq_gen.append(gen.predict([cond, const], verbose=0))
         elif mode == 'VAEGAN':
             # call encoder
             mean, logvar = gen.encoder([cond, const])
@@ -104,7 +104,7 @@ def plot_sequences(gen,
             for ii in range(ens_size):
                 noise_shape = cond[0, ..., 0].shape + (latent_variables,)
                 noise_gen = NoiseGenerator(noise_shape, batch_size=batch_size)
-                seq_gen.append(gen.decoder.predict([mean, logvar, noise_gen(), const]))
+                seq_gen.append(gen.decoder.predict([mean, logvar, noise_gen(), const], verbose=0))
 
         seq_real = data.denormalise(seq_real)
         cond = data.denormalise(cond)
