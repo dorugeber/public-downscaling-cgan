@@ -1,14 +1,14 @@
 EWC:
     GENERAL:
-        TRUTH_PATH: '/flooddata/IMERG-regICPAC-6hr'
-        FORECAST_PATH: '/flooddata/IFS-regICPAC-ens1'
-        CONSTANTS_PATH: '/flooddata/constants-regICPAC'
+        TRUTH_PATH: '/data/IMERG-regICPAC-6hr'
+        FORECAST_PATH: '/mnt/ifs-icpac/IFS-regICPAC-ens1'
+        CONSTANTS_PATH: '/data/constants-regICPAC'
 
     TFRecords:
-        tfrecords_path: '/flooddata/tfrecords-regICPAC'
+        tfrecords_path: '/mnt/ifs-icpac/tfrecords-regICPAC'
 
 
-LOCATION2:
+AOPP:
     GENERAL:
         TRUTH_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/IMERG-regICPAC-6hr'
         FORECAST_PATH: '/network/group/aopp/predict/TIP018_HARRIS_TENSORFL/IFS-regICPAC-ens1'
