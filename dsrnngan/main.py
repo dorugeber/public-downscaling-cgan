@@ -118,7 +118,7 @@ if __name__ == "__main__":
 
     if problem_type == "normal":
         autocoarsen = False
-        input_channels = 4*len(data.all_fcst_fields)
+        input_channels = 10*len(data.all_fcst_fields)
     elif problem_type == "autocoarsen":
         autocoarsen = True
         input_channels = 1

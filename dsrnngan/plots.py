@@ -120,7 +120,7 @@ def plot_sequences(gen,
         # if cond (network input) has more than one channel, look for 'tp',
         # else just plot the data we have (e.g., coarsened truth)
         if cond.shape[-1] > 1:
-            tpidx = 4*data.all_fcst_fields.index('tp')
+            tpidx = 10*data.all_fcst_fields.index('tp')
         else:
             tpidx = 0
         plot_img(cond[0, :, :, tpidx], value_range=value_range)

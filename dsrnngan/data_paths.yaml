@@ -26,3 +26,13 @@ COURSE:
 
     TFRecords:
         tfrecords_path: '/data/course-material/tfrecords'
+
+
+ANDREW:
+    GENERAL:
+        TRUTH_PATH: '/data/course-material/IMERG'
+        FORECAST_PATH: '/data/course-material/IFSyears'
+        CONSTANTS_PATH: '/data/course-material/constants'
+
+    TFRecords:
+        tfrecords_path: '/data/andrew/tfrecords'

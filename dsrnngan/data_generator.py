@@ -42,7 +42,7 @@ class DataGenerator(Sequence):
         assert end_hour <= 168
         assert start_hour % HOURS == 0
         assert end_hour % HOURS == 0
-        assert end_hour > start_hour
+        assert end_hour >= start_hour + 24
         assert autocoarsen is False  # untested, probably not useful in this project
 
         self.fcst_fields = fcst_fields
@@ -66,8 +66,8 @@ class DataGenerator(Sequence):
         # convert to numpy array for easy use of np.repeat
         temp_dates = np.array(dates)
 
-        # represent valid lead-time intervals, 0 = 0-6 hours, 1 = 6-12 hours, 2 = 12-18 hours etc
-        temp_time_idxs = np.arange(start_hour//HOURS, end_hour//HOURS)
+        # represent valid lead-time intervals, 0 = 0-24 hours, 1 = 6-30 hours, 2 = 12-36 hours etc
+        temp_time_idxs = np.arange(start_hour//HOURS, end_hour//HOURS - 3)
 
         # if no shuffle, the DataGenerator will return each interval from the
         # first date, then each interval from the second date, etc.

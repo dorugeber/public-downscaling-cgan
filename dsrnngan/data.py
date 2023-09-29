@@ -114,15 +114,20 @@ def load_truth_and_mask(date,
     '''
     # convert date and time_idx to get the correct truth file
     fcst_date = datetime.datetime.strptime(date, "%Y%m%d")
-    valid_dt = fcst_date + datetime.timedelta(hours=int(time_idx)*HOURS)  # needs to change for 12Z forecasts
-    fname = valid_dt.strftime('%Y%m%d_%H')
-    data_path = os.path.join(TRUTH_PATH, f"{fname}.nc4")
 
-    ds = xr.open_dataset(data_path)
-    da = ds["precipitationCal"]
-    y = da.values
-    ds.close()
+    imerg_list = []
+    for ii in range(4):  # does loop ii = 0, 1, 2, 3
+        valid_dt = fcst_date + datetime.timedelta(hours=(int(time_idx)+ii)*HOURS)  # needs to change for 12Z forecasts
+        fname = valid_dt.strftime('%Y%m%d_%H')
+        data_path = os.path.join(TRUTH_PATH, f"{fname}.nc4")
 
+        ds = xr.open_dataset(data_path)
+        da = ds["precipitationCal"]
+        imerg_list.append(da.values)
+        ds.close()
+
+    imerg_data = np.array(imerg_list)
+    y = np.mean(imerg_data, axis=0)
     # mask: False for valid truth data, True for invalid truth data
     # (compatible with the NumPy masked array functionality)
     # if all data is valid:
@@ -207,21 +212,27 @@ def load_fcst(field,
     fcst_idx = fcst_date.toordinal() - datetime.date(year, 1, 1).toordinal()
 
     if field in accumulated_fields:
-        # return mean, sd, 0, 0.  zero fields are so that each field returns a 4 x ny x nx array.
+        # return mean, sd for each 6h block, then two zero arrys.  zero fields are so that each field returns a 10 x ny x nx array.
         # accumulated fields have been pre-processed s.t. data[:, j, :, :] has accumulation between times j and j+1
-        data1 = all_data_mean[fcst_idx, time_idx, :, :]
-        data2 = all_data_sd[fcst_idx, time_idx, :, :]
-        data3 = np.zeros(data1.shape)
-        data = np.stack([data1, data2, data3, data3], axis=-1)
-    else:
-        # return mean_start, sd_start, mean_end, sd_end
-        temp_data_mean = all_data_mean[fcst_idx, time_idx:time_idx+2, :, :]
-        temp_data_sd = all_data_sd[fcst_idx, time_idx:time_idx+2, :, :]
-        data1 = temp_data_mean[0, :, :]
-        data2 = temp_data_sd[0, :, :]
-        data3 = temp_data_mean[1, :, :]
-        data4 = temp_data_sd[1, :, :]
-        data = np.stack([data1, data2, data3, data4], axis=-1)
+        temp_data_mean = all_data_mean[fcst_idx, time_idx:time_idx+4, :, :]
+        temp_data_sd = all_data_sd[fcst_idx, time_idx:time_idx+4, :, :]
+        data_list = []
+        for ii in range(4):  #  loop over ii = 0, 1, 2, 3
+            data_list.append(temp_data_mean[ii, : :])
+            data_list.append(temp_data_sd[ii, : :])
+        zero_array = np.zeros(data_list[0].shape)
+        data_list.append(zero_array)
+        data_list.append(zero_array)
+        data = np.stack(data_list, axis=-1)
+    else:  # instantaneous fields
+        # return mean, sd at each lead time
+        temp_data_mean = all_data_mean[fcst_idx, time_idx:time_idx+5, :, :]
+        temp_data_sd = all_data_sd[fcst_idx, time_idx:time_idx+5, :, :]
+        data_list = []
+        for ii in range(5):  # loop over ii = 0, 1, 2, 3, 4
+            data_list.append(temp_data_mean[ii, :, :])
+            data_list.append(temp_data_sd[ii, :, :])
+        data = np.stack(data_list, axis=-1)
 
     nc_file.close()
 
@@ -248,8 +259,8 @@ def load_fcst(field,
             return data
         elif field in ["sp", "t2m"]:
             # these are bounded well away from zero, so subtract mean from ens mean (but NOT from ens sd!)
-            data[:, :, 0] -= fcst_norm[field]["mean"]
-            data[:, :, 2] -= fcst_norm[field]["mean"]
+            for ii in range(5):
+                data[:, :, 2*ii] -= fcst_norm[field]["mean"]
             return data/fcst_norm[field]["std"]
         elif field in nonnegative_fields:
             return data/fcst_norm[field]["max"]
@@ -268,7 +279,7 @@ def load_fcst_stack(fields,
     '''
     Returns forecast fields, for the given date and time interval.
     Each field returned by load_fcst has two channels (see load_fcst for details),
-    then these are concatentated to form an array of H x W x 4*len(fields)
+    then these are concatentated to form an array of H x W x 10*len(fields)
     '''
     field_arrays = []
     for f in fields:

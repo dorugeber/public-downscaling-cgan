@@ -14,7 +14,7 @@ records_folder = data_paths["TFRecords"]["tfrecords_path"]
 ds_fac = read_config.read_downscaling_factor()["downscaling_factor"]
 
 CLASSES = 4
-DEFAULT_FCST_SHAPE = (128, 128, 4*len(all_fcst_fields))
+DEFAULT_FCST_SHAPE = (128, 128, 10*len(all_fcst_fields))
 DEFAULT_CON_SHAPE = (128, 128, 2)
 DEFAULT_OUT_SHAPE = (128, 128, 1)
 
@@ -177,14 +177,14 @@ def write_data(year,
     scaling_factor = ds_fac
 
     # chosen to approximately cover the full image, but can be changed!
-    nsamples = img_size_h*img_size_w//(img_chunk_width**2)
+    nsamples = 1  # img_size_h*img_size_w//(img_chunk_width**2)
     print("Samples per image:", nsamples)  # note, actual samples may be less than this if mask is used to exclude some
 
     # split TFRecords by lead time, in case this is useful for training on subsets of lead time
-    for time_idx in range(28):
+    for time_idx in range(25):
         print(f"Doing time index {time_idx}")
         s_hour = time_idx*HOURS
-        e_hour = (time_idx + 1)*HOURS
+        e_hour = (time_idx + 4)*HOURS
         dates = get_dates(year,
                           start_hour=s_hour,
                           end_hour=e_hour)
@@ -194,7 +194,7 @@ def write_data(year,
                                 end_hour=e_hour,
                                 batch_size=1,
                                 log_precip=log_precip,
-                                shuffle=False,
+                                shuffle=True,
                                 constants=True,
                                 fcst_norm=fcst_norm)
 
@@ -205,7 +205,7 @@ def write_data(year,
             options = tf.io.TFRecordOptions(compression_type="GZIP")
             fle_hdles.append(tf.io.TFRecordWriter(flename, options=options))
 
-        for batch in range(len(dgc)):
+        for batch in range(len(dgc)//6):
             if (batch % 10) == 0:
                 print(time_idx, batch)
             sample = dgc.__getitem__(batch)
